@@ -1,0 +1,14 @@
+[Unit]
+Description=Blinking LED on boot
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python /home/blinking-led.py
+WorkingDirectory=/home
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=orzech123
+
+[Install]
+WantedBy=multi-user.target

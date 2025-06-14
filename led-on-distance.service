@@ -1,0 +1,14 @@
+[Unit]
+Description=LED on distance 10cm
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python /home/led-on-distance.py
+WorkingDirectory=/home
+StandardOutput=inherit
+StandardError=inherit
+Restart=always
+User=orzech123
+
+[Install]
+WantedBy=multi-user.target
