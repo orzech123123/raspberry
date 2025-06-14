@@ -18,52 +18,68 @@ GPIO.setup(LED_PIN, GPIO.OUT)
 GPIO.output(LED_PIN, GPIO.LOW)
 
 # --- Variables ---
-DELAY_TIME_SENSOR = 0.2 # Delay between sensor readings
-FADE_STEP_DELAY = 0.005 # Delay for LED fade steps
+DELAY_TIME_SENSOR = 0.2  # Delay between sensor readings
+# FADE_STEP_DELAY = 0.005 # Delay for LED fade steps (not used for simple ON/OFF)
+
+# Define constants for better readability and adjustability
+SPEED_OF_SOUND_CM_PER_S = 34300 # Speed of sound in cm/s at 20°C
+MAX_DISTANCE_CM = 400          # Maximum reliable distance for HC-SR04
+MIN_DISTANCE_CM = 2            # Minimum reliable distance for HC-SR04
+TIMEOUT_S = 0.04               # Timeout for echo pulse (corresponds to ~686cm one-way travel)
+                               # Use 0.04s for 400cm max range (400*2/34300 = 0.023s, so 0.04s is safe)
 
 def measure_distance():
-    """Measures the distance using the HC-SR04 ultrasonic sensor."""
-    # Ensure trigger pin is low
+    """
+    Measures the distance using the HC-SR04 ultrasonic sensor.
+    Includes more robust timeout handling and distance filtering.
+    Returns distance in cm, or -1 if no valid reading.
+    """
+    # Ensure trigger pin is low for a brief moment before sending the pulse
     GPIO.output(TRIG_PIN, GPIO.LOW)
-    time.sleep(2E-6)
+    time.sleep(0.000002) # 2 microseconds
 
-    # Set trigger pin high for 10 microseconds to send ping
+    # Set trigger pin high for 10 microseconds to send the sound ping
     GPIO.output(TRIG_PIN, GPIO.HIGH)
-    time.sleep(10E-6)
+    time.sleep(0.000010) # 10 microseconds
     GPIO.output(TRIG_PIN, GPIO.LOW)
 
-    # Wait for echo pin to go high (ping sent)
-    pulse_start = time.time()
+    pulse_start = time.time() # Initialize before waiting for the pulse
+    pulse_end = time.time()   # Initialize before waiting for the pulse
+
+    # Wait for echo pin to go high (start of the echo pulse)
+    # Timeout if it doesn't go high within expected time
+    start_time_wait = time.time()
     while GPIO.input(ECHO_PIN) == 0:
         pulse_start = time.time()
-        # Add a timeout to prevent infinite loop if echo is never received
-        if time.time() - pulse_start > 0.1: # Timeout after 0.1 seconds
-            return -1 # Indicate an error or no reading
+        if (pulse_start - start_time_wait) > TIMEOUT_S:
+            return -1 # Timeout waiting for pulse start
 
-    # Wait for echo pin to go low (ping received)
-    pulse_end = time.time()
+    # Wait for echo pin to go low (end of the echo pulse)
+    # Timeout if it doesn't go low within expected time
+    end_time_wait = time.time()
     while GPIO.input(ECHO_PIN) == 1:
         pulse_end = time.time()
-        # Add a timeout
-        if time.time() - pulse_end > 0.1:
-            return -1
+        if (pulse_end - end_time_wait) > TIMEOUT_S:
+            return -1 # Timeout waiting for pulse end
 
     pulse_duration = pulse_end - pulse_start
 
-    # Speed of sound at 20°C (approx 68°F) is 343 meters/second.
-    # We use 34300 cm/second. Divide by 2 because sound travels to target and back.
-    distance_cm = (pulse_duration * 34300) / 2
-    return distance_cm
+    # Calculate distance: (duration * speed of sound) / 2 (because sound travels to target and back)
+    distance_cm = (pulse_duration * SPEED_OF_SOUND_CM_PER_S) / 2
+
+    # Filter out unreliable readings:
+    # 1. Distances smaller than the sensor's minimum reliable range (often caused by noise/internal reflection)
+    # 2. Distances larger than the sensor's maximum reliable range (often caused by no echo/timeout)
+    if distance_cm > MAX_DISTANCE_CM or distance_cm < MIN_DISTANCE_CM:
+        return -1 # Indicate an invalid or out-of-range reading
+    else:
+        return distance_cm
 
 def fade_led():
-    """Fades the LED in and out using RPi.GPIO (simulated PWM)."""
-    # This simulation is basic on/off and won't be as smooth as true PWM.
-    # For true PWM with RPi.GPIO, you'd use GPIO.PWM.
-    # For this example, we'll just blink it quickly to simulate fading if PWM isn't set up.
-    # Or, a simpler approach for a quick blink is better here.
-    # Let's just make it blink clearly for this scenario.
-
-    # Blink for a short duration
+    """
+    A simple blinking function for the LED.
+    For true "fade," RPi.GPIO.PWM would be required, but this simulates it for quick feedback.
+    """
     for _ in range(3): # Blink 3 times
         GPIO.output(LED_PIN, GPIO.HIGH)
         time.sleep(0.1)
@@ -75,23 +91,26 @@ try:
     while True:
         dist_cm = measure_distance()
 
-        if dist_cm != -1: # Check if a valid distance was measured
+        if dist_cm != -1: # Check if a valid, in-range distance was measured
             print(f'Distance = {dist_cm:.1f} cm')
 
             if dist_cm < 15:
-                print("Distance less than 15cm! Blinking LED.")
-                fade_led() # Call the blinking function
+                print("Distance less than 15cm! Turning ON LED.")
+                GPIO.output(LED_PIN, GPIO.HIGH)
+                # You can uncomment fade_led() here if you prefer a blink on activation
+                # fade_led()
             else:
-                print("Distance 15cm or more. Turning off LED.")
+                print("Distance 15cm or more. Turning OFF LED.")
                 GPIO.output(LED_PIN, GPIO.LOW) # Turn off LED
         else:
-            print("Could not get a distance reading. Retrying...")
-            GPIO.output(LED_PIN, GPIO.LOW) # Ensure LED is off if no reading
+            # If measure_distance returns -1, it means no valid, in-range reading was obtained
+            print("Could not get a reliable distance reading (out of range or error). Turning OFF LED.")
+            GPIO.output(LED_PIN, GPIO.LOW) # Ensure LED is off if no valid reading
 
         time.sleep(DELAY_TIME_SENSOR)
 
 except KeyboardInterrupt:
-    print("Program stopped by user.")
+    print("\nProgram stopped by user.")
 finally:
     GPIO.cleanup() # Clean up all GPIOs on exit
     print("GPIO cleanup complete.")
