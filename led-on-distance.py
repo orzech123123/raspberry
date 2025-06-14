@@ -1,5 +1,6 @@
 import RPi.GPIO as GPIO
 import time
+from collections import deque # Using deque for efficient history management
 
 # --- Ultrasonic Sensor Setup ---
 # Board numbering system to use
@@ -27,6 +28,10 @@ MAX_DISTANCE_CM = 400          # Maximum reliable distance for HC-SR04
 MIN_DISTANCE_CM = 2            # Minimum reliable distance for HC-SR04
 TIMEOUT_S = 0.04               # Timeout for echo pulse (corresponds to ~686cm one-way travel)
                                # Use 0.04s for 400cm max range (400*2/34300 = 0.023s, so 0.04s is safe)
+
+# --- History for Stable Readings ---
+HISTORY_SIZE = 3 # Number of recent measurements to consider
+distance_history = deque(maxlen=HISTORY_SIZE) # A deque automatically handles size
 
 def measure_distance():
     """
@@ -93,19 +98,27 @@ try:
 
         if dist_cm != -1: # Check if a valid, in-range distance was measured
             print(f'Distance = {dist_cm:.1f} cm')
+            # Add valid distance to history
+            distance_history.append(dist_cm)
 
-            if dist_cm < 15:
-                print("Distance less than 15cm! Turning ON LED.")
+            # Check new condition: current distance < 15cm AND all last HISTORY_SIZE measurements < 15cm
+            # The 'all' function will return True only if all elements in the deque satisfy the condition.
+            # We also ensure the history has enough elements before checking.
+            if dist_cm < 15 and len(distance_history) == HISTORY_SIZE and \
+               all(d < 15 for d in distance_history):
+                print(f"Distance < 15cm for last {HISTORY_SIZE} readings! Turning ON LED.")
                 GPIO.output(LED_PIN, GPIO.HIGH)
                 # You can uncomment fade_led() here if you prefer a blink on activation
                 # fade_led()
             else:
-                print("Distance 15cm or more. Turning OFF LED.")
+                # If current distance is not < 15, or history is insufficient, or not all were < 15
+                print("Condition not met to turn on LED. Turning OFF LED.")
                 GPIO.output(LED_PIN, GPIO.LOW) # Turn off LED
         else:
             # If measure_distance returns -1, it means no valid, in-range reading was obtained
             print("Could not get a reliable distance reading (out of range or error). Turning OFF LED.")
             GPIO.output(LED_PIN, GPIO.LOW) # Ensure LED is off if no valid reading
+            # Importantly, do NOT add -1 to the history. The history only tracks valid measurements.
 
         time.sleep(DELAY_TIME_SENSOR)
 
